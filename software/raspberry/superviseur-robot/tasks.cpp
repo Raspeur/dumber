@@ -96,6 +96,10 @@ void Tasks::Init() {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_sem_create(&sem_stateCamera, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Semaphores created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -465,7 +469,8 @@ void Tasks::CameraManagementTask(void *arg)
     while(1)
     {
         cout << "Wait state Camera Update" << endl << flush;
-        rt_sem_p(&sem_stateCamera, TM_INFINITE);
+        rt_sem_p(&sem_stateCamera, TM_INFINITE) != 0;
+
         rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
         msg = (MessageID)updateCamera;
         rt_mutex_release(&mutex_stateCamera);
@@ -476,7 +481,7 @@ void Tasks::CameraManagementTask(void *arg)
         else
         {
             cam->Close();
-        }
+        }  
     }
 }
 
