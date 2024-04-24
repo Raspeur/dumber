@@ -67,6 +67,8 @@ private:
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     int updateCamera = MESSAGE_CAM_CLOSE;
+    int stateCamera = MESSAGE_CAM_CLOSE;
+    Camera *cam;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -79,6 +81,7 @@ private:
     RT_TASK th_move;
     RT_TASK th_acquireBattery;
     RT_TASK th_managementCamera;
+    RT_TASK th_fluxVideo;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -87,6 +90,7 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
+    RT_MUTEX mutex_updateCamera;
     RT_MUTEX mutex_stateCamera;
 
     /**********************************************************************/
@@ -97,6 +101,7 @@ private:
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
     RT_SEM sem_stateCamera;
+    RT_SEM sem_Camera;
 
     /**********************************************************************/
     /* Message queues                                                     */
@@ -140,12 +145,16 @@ private:
     /**
      * @brief Thread acquiring the battery level of the robot.
      */
-    void AcquireBatteryTask(void);
+    void AcquireBatteryTask(void *arg);
     
     /**
      * @brief 
      */
     void CameraManagementTask(void *arg);
+     /**
+     * @brief 
+     */
+    void FluxVideoTask(void *arg);
     /**********************************************************************/
     /* Queue services                                                     */
     /**********************************************************************/

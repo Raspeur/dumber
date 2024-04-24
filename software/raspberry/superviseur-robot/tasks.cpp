@@ -137,6 +137,10 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_task_create(&th_fluxVideo, "th_fluxVideo", 0, PRIORITY_TMANAGEMENTCAMERA, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     
     cout << "Tasks created successfully" << endl << flush;
 
@@ -190,7 +194,10 @@ void Tasks::Run() {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    
+    if (err = rt_task_start(&th_fluxVideo, (void(*)(void*)) & Tasks::FluxVideoTask, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
 
     cout << "Tasks launched" << endl << flush;
 }
@@ -301,9 +308,9 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             rt_mutex_release(&mutex_move);
         } else if(msgRcv->CompareID(MESSAGE_CAM_OPEN) ||
                   msgRcv->CompareID(MESSAGE_CAM_CLOSE)) {
-            rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
+            rt_mutex_acquire(&mutex_updateCamera, TM_INFINITE);
             updateCamera = msgRcv->GetID();
-            rt_mutex_release(&mutex_stateCamera);
+            rt_mutex_release(&mutex_updateCamera);
             rt_sem_v(&sem_stateCamera);
         }
         delete(msgRcv); // must be deleted manually, no consumer
@@ -416,7 +423,7 @@ void Tasks::MoveTask(void *arg) {
 /**
  * @brief Thread acquiring the battery level of the robot.
  */
-void Tasks::AcquireBatteryTask(void) {
+void Tasks::AcquireBatteryTask(void *arg) {
     MessageBattery *msg;
     int rs;
     
@@ -457,34 +464,69 @@ void Tasks::AcquireBatteryTask(void) {
 void Tasks::CameraManagementTask(void *arg)
 {
     MessageID msg;
-    Camera *cam;
-    cam = new Camera(sm, 10);
-    cout << "AcquireBattery " << __PRETTY_FUNCTION__ << endl << flush;
+   
+    cout << "Camera Management " << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
     rt_sem_p(&sem_barrier, TM_INFINITE);
     /**************************************************************************************/
     /* The task starts here                                                               */
     /**************************************************************************************/
-    
+   
     while(1)
     {
         cout << "Wait state Camera Update" << endl << flush;
-        rt_sem_p(&sem_stateCamera, TM_INFINITE) != 0;
-
-        rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
+        rt_sem_p(&sem_stateCamera, TM_INFINITE);
+        rt_mutex_acquire(&mutex_updateCamera, TM_INFINITE);
         msg = (MessageID)updateCamera;
-        rt_mutex_release(&mutex_stateCamera);
+        rt_mutex_release(&mutex_updateCamera);
         if(msg == MESSAGE_CAM_OPEN)
         {
+            cam = new Camera(sm, 10);
             cam->Open();
         }
-        else
+        else if(msg == MESSAGE_CAM_CLOSE)
         {
             cam->Close();
-        }  
+            delete cam;
+        }
+        rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
+        stateCamera = updateCamera;
+        rt_mutex_release(&mutex_stateCamera);
     }
 }
 
+
+void Tasks::FluxVideoTask(void *arg)
+{
+    Img *image;
+    MessageImg *msgimg;
+    //Jpg image_compressed;
+    MessageID stateCam;
+    cout << "FluxVideo" << __PRETTY_FUNCTION__ << endl << flush;
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    /**************************************************************************************/
+    /* The task starts here                                                               */
+    /**************************************************************************************/
+    // Périodique 100ms
+    rt_task_set_periodic(NULL, TM_NOW, 100000000);
+    while(1)
+    {
+        //Wait for the next periodic release point
+        rt_task_wait_period(NULL);
+        
+        rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
+        stateCam = (MessageID)stateCamera;
+        rt_mutex_release(&mutex_stateCamera);
+        if(stateCam == MESSAGE_CAM_OPEN)
+        {
+            image = new Img(cam->Grab());
+            msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
+            cout << "Envoie image toMon " << __PRETTY_FUNCTION__ << endl << flush;
+            WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
+        }
+    }
+}
 /**
  * Write a message in a given queue
  * @param queue Queue identifier
