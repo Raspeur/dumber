@@ -75,6 +75,10 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_mutex_create(&mutex_stateCamera, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Mutexes created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -479,18 +483,19 @@ void Tasks::CameraManagementTask(void *arg)
         rt_mutex_acquire(&mutex_updateCamera, TM_INFINITE);
         msg = (MessageID)updateCamera;
         rt_mutex_release(&mutex_updateCamera);
+        rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
         if(msg == MESSAGE_CAM_OPEN)
         {
             cam = new Camera(sm, 10);
             cam->Open();
+            //rt_sem_v(&sem_Camera);
         }
         else if(msg == MESSAGE_CAM_CLOSE)
         {
             cam->Close();
             delete cam;
-        }
-        rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
-        stateCamera = updateCamera;
+        };
+        stateCamera = (MessageID)updateCamera;
         rt_mutex_release(&mutex_stateCamera);
     }
 }
@@ -501,30 +506,35 @@ void Tasks::FluxVideoTask(void *arg)
     Img *image;
     MessageImg *msgimg;
     //Jpg image_compressed;
-    MessageID stateCam;
+    MessageID stateCam = MESSAGE_CAM_CLOSE;
     cout << "FluxVideo" << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
     rt_sem_p(&sem_barrier, TM_INFINITE);
     /**************************************************************************************/
     /* The task starts here                                                               */
     /**************************************************************************************/
-    // Périodique 100ms
-    rt_task_set_periodic(NULL, TM_NOW, 100000000);
     while(1)
     {
-        //Wait for the next periodic release point
-        rt_task_wait_period(NULL);
-        
-        rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
-        stateCam = (MessageID)stateCamera;
-        rt_mutex_release(&mutex_stateCamera);
-        if(stateCam == MESSAGE_CAM_OPEN)
-        {
-            image = new Img(cam->Grab());
-            msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
-            cout << "Envoie image toMon " << __PRETTY_FUNCTION__ << endl << flush;
-            WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
-        }
+        //rt_sem_p(&sem_Camera, TM_INFINITE);
+        // Périodique 100ms
+        rt_task_set_periodic(NULL, TM_NOW, 100000000);
+        //do
+        //{
+            //Wait for the next periodic release point
+            rt_task_wait_period(NULL);
+
+            rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
+            stateCam = (MessageID)stateCamera;
+            
+            if(stateCam == MESSAGE_CAM_OPEN)
+            {
+                image = new Img(cam->Grab());
+                msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
+                cout << "Envoie image toMon " << __PRETTY_FUNCTION__ << endl << flush;
+                WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
+            }
+            rt_mutex_release(&mutex_stateCamera);
+        //}while(stateCam == MESSAGE_CAM_OPEN);
     }
 }
 /**
