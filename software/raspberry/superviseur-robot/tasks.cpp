@@ -379,7 +379,9 @@ void Tasks::StartRobotTask(void *arg) {
         cout << "Movement answer: " << msgSend->ToString() << endl << flush;
         WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
 
+        // Check if the robot has started
         if (msgSend->GetID() == MESSAGE_ANSWER_ACK) {
+            // Update the robotStarted variable
             rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
             robotStarted = 1;
             rt_mutex_release(&mutex_robotStarted);
@@ -401,21 +403,25 @@ void Tasks::MoveTask(void *arg) {
     /**************************************************************************************/
     /* The task starts here                                                               */
     /**************************************************************************************/
+    // Set the execution period to 100ms
     rt_task_set_periodic(NULL, TM_NOW, 100000000);
 
     while (1) {
         rt_task_wait_period(NULL);
         cout << "Periodic movement update";
+        // Acquire the state of the robot
         rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
         rs = robotStarted;
         rt_mutex_release(&mutex_robotStarted);
         if (rs == 1) {
+            // Acquire the movement to be done
             rt_mutex_acquire(&mutex_move, TM_INFINITE);
             cpMove = move;
             rt_mutex_release(&mutex_move);
             
             cout << " move: " << cpMove;
-            
+
+            // Send the movement to the robot
             rt_mutex_acquire(&mutex_robot, TM_INFINITE);
             robot.Write(new Message((MessageID)cpMove));
             rt_mutex_release(&mutex_robot);
@@ -438,14 +444,14 @@ void Tasks::AcquireBatteryTask(void *arg) {
     /**************************************************************************************/
     /* The task starts here                                                               */
     /**************************************************************************************/
+    //Set the execution period to 500ms
     rt_task_set_periodic(NULL, TM_NOW, 500000000);
     //------------
     while (1)
     {
-        //Wait for the next periodic release point
+        // Wait for the next periodic release point
         rt_task_wait_period(NULL);
-        
-        
+        // Acquire the state of the robot
         rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
         rs = robotStarted;
         rt_mutex_release(&mutex_robotStarted);
@@ -463,7 +469,9 @@ void Tasks::AcquireBatteryTask(void *arg) {
 }
 
 /**
- * @brief 
+ * @brief Manages camera-related tasks. 
+ *
+ * This function is responsible for creating and deleting the camera object, depending on the updateCamera request.
  */
 void Tasks::CameraManagementTask(void *arg)
 {
@@ -483,29 +491,38 @@ void Tasks::CameraManagementTask(void *arg)
         rt_mutex_acquire(&mutex_updateCamera, TM_INFINITE);
         msg = (MessageID)updateCamera;
         rt_mutex_release(&mutex_updateCamera);
+
+        // Update the state of the camera (block the access to the camera object)
         rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
         if(msg == MESSAGE_CAM_OPEN)
         {
+            // Creation of a new object Camera
             cam = new Camera(sm, 10);
             cam->Open();
-            //rt_sem_v(&sem_Camera);
         }
         else if(msg == MESSAGE_CAM_CLOSE)
         {
+            // Close and delete the previous created Camera object
             cam->Close();
             delete cam;
         };
+        // Update the state of the camera
         stateCamera = (MessageID)updateCamera;
         rt_mutex_release(&mutex_stateCamera);
     }
 }
 
-
+/**
+ * @brief Manages video stream-related tasks.
+ *
+ * This function is responsible for capturing frames from the camera, depending on its state,
+ * and sending them to the monitor.
+ */
 void Tasks::FluxVideoTask(void *arg)
 {
     Img *image;
     MessageImg *msgimg;
-    //Jpg image_compressed;
+    // Jpg image_compressed
     MessageID stateCam = MESSAGE_CAM_CLOSE;
     cout << "FluxVideo" << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
@@ -515,26 +532,25 @@ void Tasks::FluxVideoTask(void *arg)
     /**************************************************************************************/
     while(1)
     {
-        //rt_sem_p(&sem_Camera, TM_INFINITE);
-        // Périodique 100ms
+        // Set the execuition period to 100ms
         rt_task_set_periodic(NULL, TM_NOW, 100000000);
-        //do
-        //{
-            //Wait for the next periodic release point
-            rt_task_wait_period(NULL);
-
-            rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
-            stateCam = (MessageID)stateCamera;
-            
-            if(stateCam == MESSAGE_CAM_OPEN)
-            {
-                image = new Img(cam->Grab());
-                msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
-                cout << "Envoie image toMon " << __PRETTY_FUNCTION__ << endl << flush;
-                WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
-            }
-            rt_mutex_release(&mutex_stateCamera);
-        //}while(stateCam == MESSAGE_CAM_OPEN);
+        // Wait for the next periodic release point
+        rt_task_wait_period(NULL);
+        // Acquisition of the state of the camera (block the access to the camera object)
+        rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
+        stateCam = (MessageID)stateCamera;
+        
+        if(stateCam == MESSAGE_CAM_OPEN)
+        {
+            // Capture an image
+            image = new Img(cam->Grab());
+            // Create a new message with the image
+            msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
+            // Send the image/message to the monitor
+            cout << "Envoie image toMon " << __PRETTY_FUNCTION__ << endl << flush;
+            WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
+        }
+        rt_mutex_release(&mutex_stateCamera);
     }
 }
 /**
