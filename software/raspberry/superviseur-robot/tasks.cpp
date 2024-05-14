@@ -108,6 +108,10 @@ void Tasks::Init() {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_sem_create(&sem_validateArena, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Semaphores created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -206,6 +210,11 @@ void Tasks::Run() {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_task_start(&th_searchArena, (void(*)(void*)) & Tasks::SearchArena, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    
 
     cout << "Tasks launched" << endl << flush;
 }
@@ -322,7 +331,7 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             rt_sem_v(&sem_stateCamera);
         } else if(msgRcv->CompareID(MESSAGE_CAM_ASK_ARENA)) {
             rt_sem_v(&sem_searchArena);
-            arena_confirm = MESSAGE_CAM_ARENA_INFIRM
+            arena_confirm = MESSAGE_CAM_ARENA_INFIRM;
         }else if(msgRcv->CompareID(MESSAGE_CAM_ARENA_CONFIRM) ||
                   msgRcv->CompareID(MESSAGE_CAM_ARENA_INFIRM)) {
             arena_confirm = msgRcv->GetID();
@@ -573,7 +582,8 @@ void Tasks::SearchArena(void *arg)
     bool arenaFound = false;
     Arena arena;
     Img *image_arena;
-
+    MessageImg *msgimg;
+    Message * msg_to_mon;
     cout << "Start Research of the arena" << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
     rt_sem_p(&sem_barrier, TM_INFINITE);
@@ -586,13 +596,13 @@ void Tasks::SearchArena(void *arg)
         rt_sem_p(&sem_searchArena, TM_INFINITE);
         cout << "Search the arena" << endl << flush;
 
-        if(cam->isOpen())
+        if(cam->IsOpen())
         {
             rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
             // Capture an image
             image_arena = new Img(cam->Grab());
             rt_mutex_release(&mutex_stateCamera);
-            if(image_arena->isEmpty())
+            if(image_arena != NULL)
             {
                 // Create a new message with the nack
                 msg_to_mon = new Message(MESSAGE_ANSWER_NACK);
@@ -600,28 +610,32 @@ void Tasks::SearchArena(void *arg)
             }
             else
             {
-                // Create a new message with the ack
-                msg_to_mon = new Message(MESSAGE_ANSWER_ACK);
-                WriteInQueue(&q_messageToMon, msg_to_mon);
                 // Search the arena in the image
-                arenaFound = arena.Search(image_arena);
-                // Draw the arena in the image
-                image_arena->DrawArena(arena);
-            }
+                arena = image_arena->SearchArena();
+                if(!(arena.IsEmpty()))
+                {
+                    // Create a new message with the ack
+                    msg_to_mon = new Message(MESSAGE_ANSWER_ACK);
+                    WriteInQueue(&q_messageToMon, msg_to_mon);
+                
+                    // Draw the arena in the image
+                    image_arena->DrawArena(arena);
+                    
+                    // Create a new message with the image
+                    msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image_arena);
+                    // Send the image/message to the monitor
+                    WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
 
-            // Create a new message with the image
-            msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
-            // Send the image/message to the monitor
-            WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
-
-            // Wait for the next release point
-            rt_sem_p(&sem_validateArena, TM_INFINITE);
-            rt_mutex_acquire(&mutex_arenaValidation, TM_INFINITE);
-            if(arena_confirm)
-            {
-                arena_valid = arena;
+                    // Wait for the next release point
+                    rt_sem_p(&sem_validateArena, TM_INFINITE);
+                    rt_mutex_acquire(&mutex_arenaValidation, TM_INFINITE);
+                    if(arena_confirm)
+                    {
+                        arena_valid = arena;
+                    }
+                    rt_mutex_release(&mutex_arenaValidation);
+                }
             }
-            rt_mutex_release(&mutex_arenaValidation);
         }
         else
         {

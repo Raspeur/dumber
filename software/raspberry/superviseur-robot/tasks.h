@@ -70,7 +70,7 @@ private:
     int stateCamera = MESSAGE_CAM_CLOSE; 
     Camera *cam;
     int arena_confirm = MESSAGE_CAM_ARENA_INFIRM;
-    Arena *arena_valid;
+    Arena arena_valid;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -84,6 +84,7 @@ private:
     RT_TASK th_acquireBattery;
     RT_TASK th_managementCamera;
     RT_TASK th_fluxVideo;
+    RT_TASK th_searchArena;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -105,6 +106,7 @@ private:
     RT_SEM sem_stateCamera;
     RT_SEM sem_Camera;
     RT_SEM sem_searchArena;
+    RT_SEM sem_validateArena;
 
     /**********************************************************************/
     /* Message queues                                                     */
@@ -158,6 +160,10 @@ private:
      * @brief 
      */
     void FluxVideoTask(void *arg);
+     /**
+     * @brief 
+     */
+    void SearchArena(void *arg);
     /**********************************************************************/
     /* Queue services                                                     */
     /**********************************************************************/
