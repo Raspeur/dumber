@@ -104,6 +104,10 @@ void Tasks::Init() {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_sem_create(&sem_searchArena, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Semaphores created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -316,7 +320,16 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             updateCamera = msgRcv->GetID();
             rt_mutex_release(&mutex_updateCamera);
             rt_sem_v(&sem_stateCamera);
+        } else if(msgRcv->CompareID(MESSAGE_CAM_ASK_ARENA)) {
+            rt_sem_v(&sem_searchArena);
+            arena_confirm = MESSAGE_CAM_ARENA_INFIRM
+        }else if(msgRcv->CompareID(MESSAGE_CAM_ARENA_CONFIRM) ||
+                  msgRcv->CompareID(MESSAGE_CAM_ARENA_INFIRM)) {
+            arena_confirm = msgRcv->GetID();
+            rt_sem_v(&sem_validateArena);
         }
+ 
+
         delete(msgRcv); // must be deleted manually, no consumer
     }
 }
@@ -539,7 +552,7 @@ void Tasks::FluxVideoTask(void *arg)
         // Acquisition of the state of the camera (block the access to the camera object)
         rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
         stateCam = (MessageID)stateCamera;
-        
+
         if(stateCam == MESSAGE_CAM_OPEN)
         {
             // Capture an image
@@ -547,10 +560,75 @@ void Tasks::FluxVideoTask(void *arg)
             // Create a new message with the image
             msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
             // Send the image/message to the monitor
-            cout << "Envoie image toMon " << __PRETTY_FUNCTION__ << endl << flush;
             WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
         }
         rt_mutex_release(&mutex_stateCamera);
+    }
+}
+/**
+ * @brief Search the arena in the image
+ */
+void Tasks::SearchArena(void *arg)
+{
+    bool arenaFound = false;
+    Arena arena;
+    Img *image_arena;
+
+    cout << "Start Research of the arena" << __PRETTY_FUNCTION__ << endl << flush;
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+
+    /**************************************************************************************/
+    // The task starts here
+    while (1)
+    {
+        // Wait for the next release point
+        rt_sem_p(&sem_searchArena, TM_INFINITE);
+        cout << "Search the arena" << endl << flush;
+
+        if(cam->isOpen())
+        {
+            rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
+            // Capture an image
+            image_arena = new Img(cam->Grab());
+            rt_mutex_release(&mutex_stateCamera);
+            if(image_arena->isEmpty())
+            {
+                // Create a new message with the nack
+                msg_to_mon = new Message(MESSAGE_ANSWER_NACK);
+                WriteInQueue(&q_messageToMon, msg_to_mon);
+            }
+            else
+            {
+                // Create a new message with the ack
+                msg_to_mon = new Message(MESSAGE_ANSWER_ACK);
+                WriteInQueue(&q_messageToMon, msg_to_mon);
+                // Search the arena in the image
+                arenaFound = arena.Search(image_arena);
+                // Draw the arena in the image
+                image_arena->DrawArena(arena);
+            }
+
+            // Create a new message with the image
+            msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
+            // Send the image/message to the monitor
+            WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
+
+            // Wait for the next release point
+            rt_sem_p(&sem_validateArena, TM_INFINITE);
+            rt_mutex_acquire(&mutex_arenaValidation, TM_INFINITE);
+            if(arena_confirm)
+            {
+                arena_valid = arena;
+            }
+            rt_mutex_release(&mutex_arenaValidation);
+        }
+        else
+        {
+            // Create a new message with the nack
+            msg_to_mon = new Message(MESSAGE_ANSWER_NACK);
+            WriteInQueue(&q_messageToMon, msg_to_mon);
+        }
     }
 }
 /**

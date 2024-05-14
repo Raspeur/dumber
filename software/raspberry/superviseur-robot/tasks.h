@@ -67,8 +67,10 @@ private:
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     int updateCamera = MESSAGE_CAM_CLOSE;
-    int stateCamera = MESSAGE_CAM_CLOSE;
+    int stateCamera = MESSAGE_CAM_CLOSE; 
     Camera *cam;
+    int arena_confirm = MESSAGE_CAM_ARENA_INFIRM;
+    Arena *arena_valid;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -92,7 +94,7 @@ private:
     RT_MUTEX mutex_move;
     RT_MUTEX mutex_updateCamera;
     RT_MUTEX mutex_stateCamera;
-
+    RT_MUTEX mutex_arenaValidation;
     /**********************************************************************/
     /* Semaphores                                                         */
     /**********************************************************************/
@@ -102,6 +104,7 @@ private:
     RT_SEM sem_startRobot;
     RT_SEM sem_stateCamera;
     RT_SEM sem_Camera;
+    RT_SEM sem_searchArena;
 
     /**********************************************************************/
     /* Message queues                                                     */
