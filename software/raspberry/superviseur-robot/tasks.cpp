@@ -530,10 +530,10 @@ void Tasks::FluxVideoTask(void *arg)
     /**************************************************************************************/
     /* The task starts here                                                               */
     /**************************************************************************************/
+    // Set the execution period to 100ms
+    rt_task_set_periodic(NULL, TM_NOW, 100000000);
     while(1)
     {
-        // Set the execuition period to 100ms
-        rt_task_set_periodic(NULL, TM_NOW, 100000000);
         // Wait for the next periodic release point
         rt_task_wait_period(NULL);
         // Acquisition of the state of the camera (block the access to the camera object)
