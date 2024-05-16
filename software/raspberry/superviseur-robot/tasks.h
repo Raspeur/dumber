@@ -67,8 +67,10 @@ private:
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     int updateCamera = MESSAGE_CAM_CLOSE;
-    int stateCamera = MESSAGE_CAM_CLOSE;
+    int stateCamera = MESSAGE_CAM_CLOSE; 
     Camera *cam;
+    int arena_confirm = MESSAGE_CAM_ARENA_INFIRM;
+    Arena *arena_valid;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -82,6 +84,7 @@ private:
     RT_TASK th_acquireBattery;
     RT_TASK th_managementCamera;
     RT_TASK th_fluxVideo;
+    RT_TASK th_searchArena;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -92,7 +95,7 @@ private:
     RT_MUTEX mutex_move;
     RT_MUTEX mutex_updateCamera;
     RT_MUTEX mutex_stateCamera;
-
+    RT_MUTEX mutex_arenaValidation;
     /**********************************************************************/
     /* Semaphores                                                         */
     /**********************************************************************/
@@ -102,6 +105,8 @@ private:
     RT_SEM sem_startRobot;
     RT_SEM sem_stateCamera;
     RT_SEM sem_Camera;
+    RT_SEM sem_searchArena;
+    RT_SEM sem_validateArena;
 
     /**********************************************************************/
     /* Message queues                                                     */
@@ -148,13 +153,25 @@ private:
     void AcquireBatteryTask(void *arg);
     
     /**
-     * @brief 
+     * @brief Manages camera-related tasks. 
+     *
+     * This function is responsible for creating and deleting the camera object, depending on the updateCamera request.
      */
     void CameraManagementTask(void *arg);
+    
+    /**
+     * @brief Manages video stream-related tasks.
+     *
+     * This function is responsible for capturing frames from the camera, depending on its state,
+     * and sending them to the monitor.
+     */
+    void FluxVideoTask(void *arg);
+
      /**
      * @brief 
      */
-    void FluxVideoTask(void *arg);
+    void SearchArena(void *arg);
+    
     /**********************************************************************/
     /* Queue services                                                     */
     /**********************************************************************/

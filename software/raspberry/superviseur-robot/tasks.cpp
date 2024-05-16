@@ -28,6 +28,7 @@
 #define PRIORITY_TRECEIVEFROMMON 25
 #define PRIORITY_TSTARTROBOT 20
 #define PRIORITY_TCAMERA 21
+#define PRIORITY_TSEARCHARENA 21
 
 /*
  * Some remarks:
@@ -104,6 +105,14 @@ void Tasks::Init() {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_sem_create(&sem_searchArena, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_sem_create(&sem_validateArena, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Semaphores created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -141,7 +150,11 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_task_create(&th_fluxVideo, "th_fluxVideo", 0, PRIORITY_TMANAGEMENTCAMERA, 0)) {
+    if (err = rt_task_create(&th_fluxVideo, "th_fluxVideo", 0, PRIORITY_TCAMERA, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_searchArena, "th_searchArena", 0, PRIORITY_TSEARCHARENA, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -202,6 +215,11 @@ void Tasks::Run() {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_task_start(&th_searchArena, (void(*)(void*)) & Tasks::SearchArena, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    
 
     cout << "Tasks launched" << endl << flush;
 }
@@ -316,7 +334,16 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             updateCamera = msgRcv->GetID();
             rt_mutex_release(&mutex_updateCamera);
             rt_sem_v(&sem_stateCamera);
+        } else if(msgRcv->CompareID(MESSAGE_CAM_ASK_ARENA)) {
+            rt_sem_v(&sem_searchArena);
+            arena_confirm = MESSAGE_CAM_ARENA_INFIRM;
+        }else if(msgRcv->CompareID(MESSAGE_CAM_ARENA_CONFIRM) ||
+                  msgRcv->CompareID(MESSAGE_CAM_ARENA_INFIRM)) {
+            arena_confirm = msgRcv->GetID();
+            rt_sem_v(&sem_validateArena);
         }
+ 
+
         delete(msgRcv); // must be deleted manually, no consumer
     }
 }
@@ -488,8 +515,11 @@ void Tasks::CameraManagementTask(void *arg)
     {
         cout << "Wait state Camera Update" << endl << flush;
         rt_sem_p(&sem_stateCamera, TM_INFINITE);
+        
+        // Acquisition of the updateCamera message ID (block the access to the updateCamera)
         rt_mutex_acquire(&mutex_updateCamera, TM_INFINITE);
         msg = (MessageID)updateCamera;
+        // Realease the access to the updateCamera message ID
         rt_mutex_release(&mutex_updateCamera);
 
         // Update the state of the camera (block the access to the camera object)
@@ -532,6 +562,7 @@ void Tasks::FluxVideoTask(void *arg)
     /**************************************************************************************/
     // Set the execution period to 100ms
     rt_task_set_periodic(NULL, TM_NOW, 100000000);
+    
     while(1)
     {
         // Wait for the next periodic release point
@@ -539,17 +570,102 @@ void Tasks::FluxVideoTask(void *arg)
         // Acquisition of the state of the camera (block the access to the camera object)
         rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
         stateCam = (MessageID)stateCamera;
-        
+
         if(stateCam == MESSAGE_CAM_OPEN)
         {
             // Capture an image
             image = new Img(cam->Grab());
-            // Create a new message with the image
-            msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
-            // Send the image/message to the monitor
-            cout << "Envoie image toMon " << __PRETTY_FUNCTION__ << endl << flush;
-            WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
+            if(image != NULL)
+            {
+                rt_mutex_acquire(&mutex_arenaValidation, TM_INFINITE);
+                if(arena_valid != NULL)
+                {
+                    image->DrawArena(*arena_valid);
+                }
+                rt_mutex_release(&mutex_arenaValidation);
+                // Create a new message with the image
+                msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image);
+                // Send the image/message to the monitor
+                WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
+            }            
         }
+        // Realease the access to the camera object
+        rt_mutex_release(&mutex_stateCamera);
+    }
+}
+/**
+ * @brief Search the arena in the image
+ */
+void Tasks::SearchArena(void *arg)
+{
+    bool arenaFound = false;
+    Arena *arena;
+    Img *image_arena;
+    MessageImg *msgimg;
+    Message * msg_to_mon;
+    cout << "Start Research of the arena" << __PRETTY_FUNCTION__ << endl << flush;
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+
+    /**************************************************************************************/
+    // The task starts here
+    while (1)
+    {
+        // Wait for the next release point
+        rt_sem_p(&sem_searchArena, TM_INFINITE);
+        cout << "Search the arena" << endl << flush;
+        // Acquisition of the state of the camera (block the access to the camera object)
+        rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
+        if(cam->IsOpen())
+        {
+            // Capture an image
+            image_arena = new Img(cam->Grab());
+
+            // Check if the image is empty
+            if(image_arena == NULL)
+            {
+                // Create a new message with the nack
+                msg_to_mon = new Message(MESSAGE_ANSWER_NACK);
+                WriteInQueue(&q_messageToMon, msg_to_mon);
+            }
+            else
+            {
+                // Search the arena in the image
+                arena = new Arena (image_arena->SearchArena());
+                if(!(arena->IsEmpty()))
+                {
+                    // Create a new message with the ack
+                    msg_to_mon = new Message(MESSAGE_ANSWER_ACK);
+                    WriteInQueue(&q_messageToMon, msg_to_mon);
+                
+                    // Draw the arena in the image
+                    image_arena->DrawArena(*arena);
+                    
+                    // Create a new message with the image
+                    msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image_arena);
+                    // Send the image/message to the monitor
+                    WriteInQueue(&q_messageToMon, msgimg); // msg will be deleted by sendToMon
+
+                    // Wait for the next release point
+                    rt_sem_p(&sem_validateArena, TM_INFINITE);
+                    
+                    rt_mutex_acquire(&mutex_arenaValidation, TM_INFINITE);
+                    // Check if the arena is valid
+                    if(arena_confirm == MESSAGE_CAM_ARENA_CONFIRM)
+                    {
+                        arena_valid = arena;
+                    }
+                    rt_mutex_release(&mutex_arenaValidation);
+                }
+            }
+        }
+        else
+        {
+            // Create a new message with the nack
+            msg_to_mon = new Message(MESSAGE_ANSWER_NACK);
+            WriteInQueue(&q_messageToMon, msg_to_mon);
+        }
+        // Realease the access to the camera object
         rt_mutex_release(&mutex_stateCamera);
     }
 }
