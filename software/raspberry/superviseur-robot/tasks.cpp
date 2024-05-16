@@ -28,6 +28,7 @@
 #define PRIORITY_TRECEIVEFROMMON 25
 #define PRIORITY_TSTARTROBOT 20
 #define PRIORITY_TCAMERA 21
+#define PRIORITY_TSEARCHARENA 21
 
 /*
  * Some remarks:
@@ -149,7 +150,11 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_task_create(&th_fluxVideo, "th_fluxVideo", 0, PRIORITY_TMANAGEMENTCAMERA, 0)) {
+    if (err = rt_task_create(&th_fluxVideo, "th_fluxVideo", 0, PRIORITY_TCAMERA, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_searchArena, "th_searchArena", 0, PRIORITY_TSEARCHARENA, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -557,16 +562,16 @@ void Tasks::FluxVideoTask(void *arg)
     /**************************************************************************************/
     // Set the execution period to 100ms
     rt_task_set_periodic(NULL, TM_NOW, 100000000);
-    // Wait for the next periodic release point
+    
     while(1)
     {
-
+        // Wait for the next periodic release point
         rt_task_wait_period(NULL);
         // Acquisition of the state of the camera (block the access to the camera object)
         rt_mutex_acquire(&mutex_stateCamera, TM_INFINITE);
         stateCam = (MessageID)stateCamera;
 
-        if(stateCam == MESSAGE_CAM_OPEN && )
+        if(stateCam == MESSAGE_CAM_OPEN)
         {
             // Capture an image
             image = new Img(cam->Grab());
@@ -575,7 +580,7 @@ void Tasks::FluxVideoTask(void *arg)
                 rt_mutex_acquire(&mutex_arenaValidation, TM_INFINITE);
                 if(arena_valid != NULL)
                 {
-                    image->DrawArena(arena_valid);
+                    image->DrawArena(*arena_valid);
                 }
                 rt_mutex_release(&mutex_arenaValidation);
                 // Create a new message with the image
@@ -634,7 +639,7 @@ void Tasks::SearchArena(void *arg)
                     WriteInQueue(&q_messageToMon, msg_to_mon);
                 
                     // Draw the arena in the image
-                    image_arena->DrawArena(arena);
+                    image_arena->DrawArena(*arena);
                     
                     // Create a new message with the image
                     msgimg = new MessageImg(MESSAGE_CAM_IMAGE, image_arena);
@@ -646,7 +651,7 @@ void Tasks::SearchArena(void *arg)
                     
                     rt_mutex_acquire(&mutex_arenaValidation, TM_INFINITE);
                     // Check if the arena is valid
-                    if(arena_confirm)
+                    if(arena_confirm == MESSAGE_CAM_ARENA_CONFIRM)
                     {
                         arena_valid = arena;
                     }
