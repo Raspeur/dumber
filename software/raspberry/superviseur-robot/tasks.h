@@ -70,7 +70,7 @@ private:
     int stateCamera = MESSAGE_CAM_CLOSE; 
     Camera *cam;
     int arena_confirm = MESSAGE_CAM_ARENA_INFIRM;
-    Arena arena_valid;
+    Arena *arena_valid;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -153,17 +153,25 @@ private:
     void AcquireBatteryTask(void *arg);
     
     /**
-     * @brief 
+     * @brief Manages camera-related tasks. 
+     *
+     * This function is responsible for creating and deleting the camera object, depending on the updateCamera request.
      */
     void CameraManagementTask(void *arg);
-     /**
-     * @brief 
+    
+    /**
+     * @brief Manages video stream-related tasks.
+     *
+     * This function is responsible for capturing frames from the camera, depending on its state,
+     * and sending them to the monitor.
      */
     void FluxVideoTask(void *arg);
+
      /**
      * @brief 
      */
     void SearchArena(void *arg);
+    
     /**********************************************************************/
     /* Queue services                                                     */
     /**********************************************************************/
